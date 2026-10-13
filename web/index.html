@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Operational RAG — Stage 1</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { background: #10151e; color: #e5edf5; margin: 0; }
+    .wrap { max-width: 840px; margin: 38px auto; padding: 0 18px; }
+    h1 { font-size: 27px; margin: 0; letter-spacing: -.5px; }
+    .sub { color: #a8b5c7; line-height: 1.55; margin: 10px 0 25px; }
+    .bar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+    .chip { background: #1a2432; color: #cad6e5; font-size: 12px; border: 1px solid #354052; padding: 7px 11px; border-radius: 999px; }
+    .panel { background: #18212e; border: 1px solid #344255; border-radius: 18px; padding: 22px; margin-bottom: 18px; }
+    .hint { color: #99a9bd; font-size: 13px; margin-bottom: 16px; }
+    .inputrow { display: flex; gap: 9px; }
+    input { flex: 1; min-width: 0; padding: 14px 15px; background: #0d141d; color: white; border: 1px solid #536177; border-radius: 11px; font: inherit; }
+    input:focus { outline: 2px solid #6da9f1; }
+    button { background: #4689e8; color: white; padding: 12px 19px; font-weight: 600; border: 0; border-radius: 11px; cursor: pointer; }
+    button:disabled { opacity: .5; }
+    h2 { font-size: 15px; margin: 0 0 14px; }
+    #answer { white-space: pre-wrap; line-height: 1.7; overflow-wrap: anywhere; }
+    #answer:empty:before { content: '질문을 입력하면 여기에 답변이 표시됩니다.'; color: #9aaac0; }
+    .src { padding: 14px 0; border-top: 1px solid #374458; }
+    .src:first-child { border-top: 0; }
+    .src strong { display: block; font-size: 14px; margin-bottom: 5px; }
+    .src p { margin: 4px 0; color: #b9c7d8; font-size: 13px; line-height: 1.55; }
+    #message { color: #b6c8de; font-size: 13px; }
+    footer { color: #8fa1b7; font-size: 12px; line-height: 1.65; margin: 25px 0 40px; }
+    @media (max-width: 520px) { .inputrow { flex-direction: column; } button { padding: 14px; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Operational RAG <span style="color:#71b1ff">/ Stage 1</span></h1>
+  <p class="sub">검증된 문서만 검색하는 로컬 RAG 데모. 현재 기본 모드는 BM25 + 문자 TF-IDF이며, 유료 API 없이도 사용할 수 있습니다.</p>
+  <div class="bar"><span class="chip" id="health">상태 확인 중</span><span class="chip" id="index">문서 확인 중</span></div>
+  <div class="panel">
+    <h2>문서에 질문하기</h2>
+    <div class="hint">예: VPN 오류 720 해결 방법 / 사내 비밀번호 재설정 / MFA 인증 기기 분실</div>
+    <form id="form" class="inputrow"><input id="query" autocomplete="off" required maxlength="5000" placeholder="질문을 입력하세요" /><button id="submit">질문하기</button></form>
+  </div>
+  <div class="panel"><div class="bar" style="justify-content:space-between"><h2>답변</h2><span class="chip" id="mode">결과 대기</span></div><div id="answer"></div><p id="message"></p></div>
+  <div class="panel"><h2>참조 문서</h2><div id="sources"><p class="hint">답변 근거와 검색 점수가 표시됩니다.</p></div></div>
+  <footer>포트폴리오 데모용입니다. 본문 출처는 공개 가능한 것으로 검증된 문서만 색인합니다. 검색 점수는 답변의 사실적 정확도를 보증하지 않습니다.</footer>
+</div>
+<script>
+const el = id => document.getElementById(id);
+async function refresh() {
+  try {
+    const data = await (await fetch('/health')).json();
+    el('health').textContent = data.ready ? '● 서버 정상' : '● 문서 없음';
+    el('index').textContent = `${data.indexed_chunks} 청크 · ${data.embedding_backend} · LLM ${data.llm_configured ? '연결 설정' : '미설정'}`;
+  } catch { el('health').textContent = '● 서버 연결 실패'; }
+}
+el('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const question = el('query').value.trim();
+  if (!question) return;
+  el('submit').disabled = true;
+  el('mode').textContent = '검색 중';
+  el('answer').textContent = '';
+  el('sources').replaceChildren();
+  el('message').textContent = '';
+  try {
+    const response = await fetch('/chat', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({message: question})});
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    el('answer').textContent = data.answer;
+    el('mode').textContent = data.mode;
+    if (data.warning) el('message').textContent = `LLM 연결 실패로 원문 발췌 전환: ${data.warning}`;
+    if (!data.sources.length) el('sources').textContent = '관련된 검증 문서가 없습니다.';
+    for (const [i, src] of data.sources.entries()) {
+      const div = document.createElement('div'); div.className = 'src';
+      const title = document.createElement('strong'); title.textContent = `[${i+1}] ${src.title} · ${src.source}`;
+      const meta = document.createElement('p'); meta.textContent = `RRF ${src.score.toFixed(5)} · BM25 순위 ${src.bm25_rank ?? '-'} · Vector 순위 ${src.vector_rank ?? '-'}`;
+      const body = document.createElement('p'); body.textContent = src.excerpt;
+      div.append(title, meta, body); el('sources').appendChild(div);
+    }
+  } catch (error) { el('answer').textContent = `요청 실패: ${error.message}`; el('mode').textContent = '오류'; }
+  finally { el('submit').disabled = false; }
+});
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+[
+  {"question": "VPN 오류 720은 어떻게 해결하나요?", "gold_sources": ["vpn_guide.md"]},
+  {"question": "계정 비밀번호를 잊으면 무엇을 해야 하나요?", "gold_sources": ["password_guide.md"]},
+  {"question": "VPN 설치 전 무엇을 확인하나요?", "gold_sources": ["vpn_guide.md"]},
+  {"question": "MFA 인증 기기를 사용할 수 없으면요?", "gold_sources": ["password_guide.md"]}
+]
